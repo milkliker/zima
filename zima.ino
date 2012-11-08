@@ -2,41 +2,44 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
-// Enter a MAC address and IP address for your controller below.
-// The IP address will be dependent on your local network:
-byte mac[] = { 
-  0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
-IPAddress ip(192, 168, 8, 249);
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+IPAddress ip(192, 168, 2, 222);
+IPAddress dns_server(172, 16, 0, 1);
+IPAddress gateway(192, 168, 2, 1);
+IPAddress subnet(255, 255, 255, 0);
 
+//output pin can not use 11-13, cause w5100 use it for ethernet.
+int output_pin = 8;
 
-
-// Initialize the Ethernet server library
-// with the IP address and port you want to use 
-// (port 80 is default for HTTP):
 EthernetServer server(80);
 
-void setup() {
-  // Open serial communications and wait for port to open:
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for Leonardo only
-  }
+String token = "";
 
-  // start the Ethernet connection:
-  if (Ethernet.begin(mac) == 0) {
-    Serial.println("Failed to configure Ethernet DHCP");
-    // no point in carrying on, so do nothing forevermore:
-    for(;;)
-      ;
-  }
-  
-//  Ethernet.begin(mac, ip);
-  
-  // print your local IP address:
-  Serial.print("My IP address: ");
-  Serial.println(Ethernet.localIP());
+void setup() {
+  Serial.begin(9600);
+
+  Serial.print("config: ");
+  Serial.print(ip);
+  Serial.print(" ");
+  Serial.print(dns_server);
+  Serial.print(" ");
+  Serial.print(gateway);
+  Serial.print(" ");
+  Serial.print(subnet);
   Serial.println();
+
+  Ethernet.begin(mac, ip, dns_server, gateway, subnet);
+
+  Serial.print("Begin with: ");
+  Serial.print(Ethernet.localIP());
+  Serial.println();
+
   server.begin();
+
+  pinMode(output_pin, OUTPUT);
+
+  //init set
+  digitalWrite(output_pin, LOW);
 }
 
 
@@ -44,55 +47,78 @@ void loop() {
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
-    Serial.println("new client");
-    // an http request ends with a blank line
     boolean currentLineIsBlank = true;
+    String currentLine = "";
+    String request = "";
+    int notice_length = 0;
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
-     //   Serial.write(c);
-        // if you've gotten to the end of the line (received a newline
-        // character) and the line is blank, the http request has ended,
-        // so you can send a reply
+        currentLine += c;
+        notice_length++;
         if (c == '\n' && currentLineIsBlank) {
-          // send a standard http response header
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: text/html");
-          client.println("Connnection: close");
-          client.println();
-          client.println("<!DOCTYPE HTML>");
-          client.println("<html>");
-          // add a meta refresh tag, so the browser pulls again every 5 seconds:
-          client.println("<meta http-equiv=\"refresh\" content=\"5\">");
-          // output the value of each analog input pin
-          for (int analogChannel = 0; analogChannel < 6; analogChannel++) {
-            int sensorReading = analogRead(analogChannel);
-            client.print("analog input ");
-            client.print(analogChannel);
-            client.print(" is ");
-            client.print(sensorReading);
-            client.println("<br />");       
-          }
-          client.println("</html>");
           break;
         }
         if (c == '\n') {
           // you're starting a new line
           currentLineIsBlank = true;
-        } 
-        else if (c != '\r') {
-          // you've gotten a character on the current line
+          if (currentLine.substring(0, 4) == "GET ") {
+            request = currentLine.substring(4, notice_length - 11);
+          }
+          currentLine = "";
+        } else if (c != '\r') {
           currentLineIsBlank = false;
         }
       }
     }
-    // give the web browser time to receive the data
-    delay(1);
-    // close the connection:
+    //Serial.println(request);
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println("Connnection: close");
+    client.println();
+
+    if (request.substring(0, 6) == "/heart") {
+      client.println(millis());
+    } else if (request.substring(0, 6) == "/open/" &&  request.substring(6, 6 + 16) == token) {
+      open_door();
+      refresh_token();
+      client.println(token);
+    } else if (request.substring(0, 6) == "/open/") {
+      client.println("invalid token");
+      
+      Serial.print("token:");
+      Serial.println(token);
+      /*
+      client.print("real token:[");
+      client.print(token);
+      client.println("]");
+      */
+    } else {
+      // some other request
+    }
+
+    delay(100);
     client.stop();
-    Serial.println("client disonnected");
   }
 }
 
+void open_door() {
+  Serial.println("open");
+  digitalWrite(output_pin, HIGH);
+  delay(1000);
+  digitalWrite(output_pin, LOW);
+}
 
+void refresh_token() {
+  String new_token = "";
+  char c;
+  randomSeed(analogRead(0));
+  for(int i = 0; i < 16; i++) {
+    if (random(0, 100) % 2 == 0) c = 'A' + random(1, 26);
+    else c = 'a' + random(1, 26);
+    new_token += c;
+  }
+  token = new_token;
+}
 
